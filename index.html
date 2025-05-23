@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mouse-Following Fluid Simulation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            cursor: none;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 12px;
+            border-radius: 8px;
+            color: white;
+            font-size: 12px;
+        }
+        
+        .control-group {
+            margin-bottom: 8px;
+        }
+        
+        label {
+            display: inline-block;
+            width: 90px;
+            font-size: 11px;
+        }
+        
+        input[type="range"] {
+            width: 80px;
+        }
+        
+        .fps {
+            color: #0f0;
+            font-weight: bold;
+        }
+        
+        .mouse-cursor {
+            position: fixed;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1000;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 20px rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="mouse-cursor" id="cursor"></div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <span class="fps" id="fps">FPS: 60</span>
+        </div>
+        <div class="control-group">
+            <label>Attraction:</label>
+            <input type="range" id="attraction" min="0.5" max="5" step="0.1" value="2">
+        </div>
+        <div class="control-group">
+            <label>Flow Speed:</label>
+            <input type="range" id="flowSpeed" min="0.1" max="2" step="0.1" value="0.8">
+        </div>
+        <div class="control-group">
+            <label>Particles:</label>
+            <input type="range" id="particles" min="50" max="300" step="10" value="150">
+        </div>
+        <div class="control-group">
+            <label>Trail Length:</label>
+            <input type="range" id="trail" min="0.05" max="0.3" step="0.05" value="0.15">
+        </div>
+    </div>
+
+    <script>
+        class MouseFluidSimulation {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.cursor = document.getElementById('cursor');
+                this.resizeCanvas();
+                
+                // Mouse tracking
+                this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+                this.prevMouse = { x: this.mouse.x, y: this.mouse.y };
+                this.mouseVelocity = { x: 0, y: 0 };
+                
+                // Simulation settings
+                this.attraction = 2;
+                this.flowSpeed = 0.8;
+                this.maxParticles = 150;
+                this.trailAlpha = 0.15;
+                
+                // Particles
+                this.particles = [];
+                
+                // Performance
+                this.fps = 60;
+                this.lastTime = 0;
+                this.frameCount = 0;
+                
+                this.initParticles();
+                this.setupEventListeners();
+                this.setupControls();
+                this.animate();
+            }
+            
+            resizeCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+            
+            initParticles() {
+                this.particles = [];
+                for (let i = 0; i < this.maxParticles; i++) {
+                    this.particles.push({
+                        x: Math.random() * window.innerWidth,
+                        y: Math.random() * window.innerHeight,
+                        vx: 0,
+                        vy: 0,
+                        size: Math.random() * 4 + 2,
+                        opacity: Math.random() * 0.5 + 0.5,
+                        hue: Math.random() * 60 + 180, // Blue to cyan range
+                        life: Math.random() * 100 + 100,
+                        maxLife: 200,
+                        trail: []
+                    });
+                }
+            }
+            
+            setupEventListeners() {
+                const updateMouse = (e) => {
+                    this.prevMouse.x = this.mouse.x;
+                    this.prevMouse.y = this.mouse.y;
+                    
+                    this.mouse.x = e.clientX;
+                    this.mouse.y = e.clientY;
+                    
+                    // Calculate mouse velocity
+                    this.mouseVelocity.x = this.mouse.x - this.prevMouse.x;
+                    this.mouseVelocity.y = this.mouse.y - this.prevMouse.y;
+                    
+                    // Update cursor position
+                    this.cursor.style.left = this.mouse.x + 'px';
+                    this.cursor.style.top = this.mouse.y + 'px';
+                };
+                
+                document.addEventListener('mousemove', updateMouse);
+                
+                // Touch support
+                document.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    this.prevMouse.x = this.mouse.x;
+                    this.prevMouse.y = this.mouse.y;
+                    
+                    this.mouse.x = touch.clientX;
+                    this.mouse.y = touch.clientY;
+                    
+                    this.mouseVelocity.x = this.mouse.x - this.prevMouse.x;
+                    this.mouseVelocity.y = this.mouse.y - this.prevMouse.y;
+                    
+                    this.cursor.style.left = this.mouse.x + 'px';
+                    this.cursor.style.top = this.mouse.y + 'px';
+                });
+                
+                window.addEventListener('resize', () => {
+                    this.resizeCanvas();
+                    this.initParticles();
+                });
+            }
+            
+            setupControls() {
+                document.getElementById('attraction').addEventListener('input', (e) => {
+                    this.attraction = parseFloat(e.target.value);
+                });
+                
+                document.getElementById('flowSpeed').addEventListener('input', (e) => {
+                    this.flowSpeed = parseFloat(e.target.value);
+                });
+                
+                document.getElementById('particles').addEventListener('input', (e) => {
+                    this.maxParticles = parseInt(e.target.value);
+                    this.initParticles();
+                });
+                
+                document.getElementById('trail').addEventListener('input', (e) => {
+                    this.trailAlpha = parseFloat(e.target.value);
+                });
+            }
+            
+            updateParticles() {
+                for (let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    
+                    // Calculate distance to mouse
+                    const dx = this.mouse.x - p.x;
+                    const dy = this.mouse.y - p.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Attraction force towards mouse
+                    if (distance > 0) {
+                        const force = this.attraction / (distance * 0.01 + 1);
+                        const angle = Math.atan2(dy, dx);
+                        
+                        p.vx += Math.cos(angle) * force * this.flowSpeed;
+                        p.vy += Math.sin(angle) * force * this.flowSpeed;
+                    }
+                    
+                    // Add mouse velocity influence for fluid-like behavior
+                    const mouseInfluence = Math.max(0, 1 - distance / 200);
+                    p.vx += this.mouseVelocity.x * mouseInfluence * 0.1;
+                    p.vy += this.mouseVelocity.y * mouseInfluence * 0.1;
+                    
+                    // Apply some randomness for organic movement
+                    p.vx += (Math.random() - 0.5) * 0.2;
+                    p.vy += (Math.random() - 0.5) * 0.2;
+                    
+                    // Damping
+                    p.vx *= 0.95;
+                    p.vy *= 0.95;
+                    
+                    // Update position
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    
+                    // Update trail
+                    p.trail.push({ x: p.x, y: p.y });
+                    if (p.trail.length > 10) {
+                        p.trail.shift();
+                    }
+                    
+                    // Wrap around screen edges
+                    if (p.x < 0) p.x = window.innerWidth;
+                    if (p.x > window.innerWidth) p.x = 0;
+                    if (p.y < 0) p.y = window.innerHeight;
+                    if (p.y > window.innerHeight) p.y = 0;
+                    
+                    // Update life and regenerate if needed
+                    p.life--;
+                    if (p.life <= 0) {
+                        p.x = Math.random() * window.innerWidth;
+                        p.y = Math.random() * window.innerHeight;
+                        p.vx = 0;
+                        p.vy = 0;
+                        p.life = p.maxLife;
+                        p.hue = Math.random() * 60 + 180;
+                        p.trail = [];
+                    }
+                }
+            }
+            
+            render() {
+                // Create trailing effect
+                this.ctx.fillStyle = `rgba(0, 0, 0, ${this.trailAlpha})`;
+                this.ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+                
+                // Draw particle connections near mouse
+                this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                this.ctx.lineWidth = 1;
+                
+                for (let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    const mouseDistance = Math.sqrt(
+                        (p.x - this.mouse.x) * (p.x - this.mouse.x) + 
+                        (p.y - this.mouse.y) * (p.y - this.mouse.y)
+                    );
+                    
+                    if (mouseDistance < 150) {
+                        for (let j = i + 1; j < this.particles.length; j++) {
+                            const q = this.particles[j];
+                            const dx = p.x - q.x;
+                            const dy = p.y - q.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (distance < 80) {
+                                const alpha = (80 - distance) / 80 * 0.3;
+                                this.ctx.strokeStyle = `rgba(${100 + p.hue}, ${150 + p.hue/2}, 255, ${alpha})`;
+                                this.ctx.beginPath();
+                                this.ctx.moveTo(p.x, p.y);
+                                this.ctx.lineTo(q.x, q.y);
+                                this.ctx.stroke();
+                            }
+                        }
+                    }
+                }
+                
+                // Draw particles and trails
+                for (let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    
+                    // Draw trail
+                    if (p.trail.length > 1) {
+                        this.ctx.strokeStyle = `hsla(${p.hue}, 70%, 60%, 0.3)`;
+                        this.ctx.lineWidth = 2;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(p.trail[0].x, p.trail[0].y);
+                        
+                        for (let j = 1; j < p.trail.length; j++) {
+                            this.ctx.lineTo(p.trail[j].x, p.trail[j].y);
+                        }
+                        this.ctx.stroke();
+                    }
+                    
+                    // Calculate distance-based effects
+                    const mouseDistance = Math.sqrt(
+                        (p.x - this.mouse.x) * (p.x - this.mouse.x) + 
+                        (p.y - this.mouse.y) * (p.y - this.mouse.y)
+                    );
+                    
+                    const proximityEffect = Math.max(0, 1 - mouseDistance / 200);
+                    const dynamicSize = p.size + proximityEffect * 3;
+                    const dynamicOpacity = p.opacity + proximityEffect * 0.5;
+                    
+                    // Draw particle with glow
+                    const gradient = this.ctx.createRadialGradient(
+                        p.x, p.y, 0, p.x, p.y, dynamicSize * 2
+                    );
+                    gradient.addColorStop(0, `hsla(${p.hue}, 70%, 70%, ${dynamicOpacity})`);
+                    gradient.addColorStop(0.7, `hsla(${p.hue}, 70%, 50%, ${dynamicOpacity * 0.5})`);
+                    gradient.addColorStop(1, `hsla(${p.hue}, 70%, 30%, 0)`);
+                    
+                    this.ctx.fillStyle = gradient;
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, dynamicSize * 2, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    
+                    // Core particle
+                    this.ctx.fillStyle = `hsla(${p.hue}, 80%, 80%, ${dynamicOpacity})`;
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, dynamicSize, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
+                
+                // Draw mouse influence area
+                const gradient = this.ctx.createRadialGradient(
+                    this.mouse.x, this.mouse.y, 0, 
+                    this.mouse.x, this.mouse.y, 100
+                );
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.1)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                
+                this.ctx.fillStyle = gradient;
+                this.ctx.beginPath();
+                this.ctx.arc(this.mouse.x, this.mouse.y, 100, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+            
+            updateFPS(currentTime) {
+                this.frameCount++;
+                if (currentTime - this.lastTime >= 1000) {
+                    this.fps = Math.round((this.frameCount * 1000) / (currentTime - this.lastTime));
+                    document.getElementById('fps').textContent = `FPS: ${this.fps}`;
+                    this.frameCount = 0;
+                    this.lastTime = currentTime;
+                }
+            }
+            
+            animate(currentTime = 0) {
+                this.updateFPS(currentTime);
+                this.updateParticles();
+                this.render();
+                requestAnimationFrame((time) => this.animate(time));
+            }
+        }
+        
+        // Initialize simulation
+        window.addEventListener('load', () => {
+            new MouseFluidSimulation();
+        });
+    </script>
+</body>
+</html>
